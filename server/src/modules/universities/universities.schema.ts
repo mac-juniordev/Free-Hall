@@ -1,10 +1,17 @@
 import { z } from 'zod';
 
 /**
- * Matricule prefix rules:
- *  - 2–6 uppercase letters (e.g. "UB", "UBA", "UBa" — normalized to uppercase)
- *  - No digits, no symbols
+ * Loose UUID format check — accepts any hex UUID shape including nil
+ * and non-RFC-4122 variants (like our seed: 11111111-1111-1111-1111-111111111111).
+ * Matches exactly what PostgreSQL's `uuid` type accepts.
  */
+const uuidLoose = z
+  .string()
+  .regex(
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+    'Invalid UUID format'
+  );
+
 const matriculePrefixRule = z
   .string()
   .trim()
@@ -38,7 +45,7 @@ export const updateUniversitySchema = z.object({
 });
 
 export const universityIdParamSchema = z.object({
-  id: z.string().uuid('Invalid university id'),
+  id: uuidLoose,
 });
 
 export type CreateUniversityInput = z.infer<typeof createUniversitySchema>;

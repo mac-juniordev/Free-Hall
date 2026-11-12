@@ -1,5 +1,5 @@
 @baseUrl = http://localhost:4000
-@adminToken = PASTE_ADMIN_JWT_HERE
+@adminToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3OTQ1MjA1MjYsImV4cCI6MTc5NTEyNTMyNiwic3ViIjoiOTk5OTk5OTktOTk5OS05OTk5LTk5OTktOTk5OTk5OTk5OTk5In0.OewR7tYuCFABR5oyjzc1ZB25wjTsUkPcF2wTcKmZsrc
 @ccToken = PASTE_CC_JWT_HERE
 
 ### 1. List universities (PUBLIC — no auth needed)

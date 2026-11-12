@@ -1,5 +1,16 @@
 import { z } from 'zod';
 
+/**
+ * Loose UUID format check — accepts any hex UUID shape including nil
+ * and non-RFC-4122 variants (like our seed: 11111111-1111-1111-1111-111111111111).
+ */
+const uuidLoose = z
+  .string()
+  .regex(
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+    'Invalid UUID format'
+  );
+
 const passwordRule = z
   .string()
   .min(8, 'Password must be at least 8 characters')
@@ -10,7 +21,7 @@ const passwordRule = z
 
 export const registerSchema = z
   .object({
-    universityId: z.string().uuid('Select a valid university'),
+    universityId: uuidLoose,
     fullName: z.string().trim().min(3, 'Full name is too short').max(120),
     matricule: z.string().trim().min(4).max(30),
     email: z.string().trim().email('Enter a valid email (e.g., you@gmail.com)').max(150),
