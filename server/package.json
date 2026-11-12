@@ -1,9 +1,15 @@
 {
-  "name": "server",
-  "version": "1.0.0",
-  "main": "index.js",
+   "name": "freehall-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FreeHall backend — Express + TypeScript + PostgreSQL",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon --exec tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "hash-seed": "tsx src/scripts/hash-seed.ts"
   },
   "keywords": [],
   "author": "",

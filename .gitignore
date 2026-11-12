@@ -35,3 +35,4 @@ _sql/*.tar
 # === misc ===
 *.tmp
 *.swp
+_tests/token.txt
