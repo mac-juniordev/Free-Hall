@@ -13,6 +13,7 @@ import hallsRoutes from './modules/halls/halls.routes';
 import settingsRoutes from './modules/settings/settings.routes';
 import bookingsRoutes from './modules/bookings/bookings.routes';
 import swapsRoutes from './modules/swaps/swaps.routes';
+import adminRoutes from './modules/admin/admin.routes';
 
 export function createApp() {
   const app = express();
@@ -43,6 +44,7 @@ export function createApp() {
   app.use('/api/settings', settingsRoutes);
   app.use('/api/bookings', bookingsRoutes);
   app.use('/api/swaps', swapsRoutes);
+  app.use('/api/admin', adminRoutes);
 
   app.use(errorHandler);
   return app;
