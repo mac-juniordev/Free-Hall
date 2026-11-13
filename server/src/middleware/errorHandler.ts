@@ -27,6 +27,20 @@ export function errorHandler(
   if (err instanceof AppError) {
     return res.status(err.status).json({ error: err.message, code: err.code });
   }
-  logger.error({ err }, 'Unhandled error');
+
+  // ── Debug: surface the actual error for non-AppError throws ──
+  if (err instanceof Error) {
+    logger.error(
+      {
+        name: err.name,
+        message: err.message,
+        stack: err.stack,
+      },
+      'Unhandled error'
+    );
+  } else {
+    logger.error({ raw: err }, 'Unhandled non-Error');
+  }
+
   return res.status(500).json({ error: 'Internal server error' });
 }

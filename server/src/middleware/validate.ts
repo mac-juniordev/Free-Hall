@@ -8,7 +8,21 @@ export function validate(schema: ZodTypeAny, target: Target = 'body') {
   return (req: Request, _res: Response, next: NextFunction) => {
     try {
       const parsed = schema.parse(req[target]);
-      (req as any)[target] = parsed;
+
+      // Express 4's `req.query` is a prototype getter (read-only by direct
+      // assignment). Shadow it on the instance via defineProperty so the
+      // parsed/coerced value is what downstream handlers see.
+      if (target === 'query') {
+        Object.defineProperty(req, 'query', {
+          value: parsed,
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+      } else {
+        (req as any)[target] = parsed;
+      }
+
       next();
     } catch (err) {
       if (err instanceof ZodError) {

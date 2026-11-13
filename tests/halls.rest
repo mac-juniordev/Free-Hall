@@ -1,0 +1,80 @@
+@baseUrl = http://localhost:4000
+@adminToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3OTQ1MjA1MjYsImV4cCI6MTc5NTEyNTMyNiwic3ViIjoiOTk5OTk5OTktOTk5OS05OTk5LTk5OTktOTk5OTk5OTk5OTk5In0.OewR7tYuCFABR5oyjzc1ZB25wjTsUkPcF2wTcKmZsrc
+@ccToken = PASTE_CC_TOKEN
+
+### 1. List all halls as admin (no filters — expect 5 halls from seed, all FREE)
+GET {{baseUrl}}/api/halls
+Authorization: Bearer {{adminToken}}
+
+### 2. Filter by zone "COLTECH" (expect 2 halls)
+GET {{baseUrl}}/api/halls?zone=COLTECH
+Authorization: Bearer {{adminToken}}
+
+### 3. Filter by tier "amphi" (expect 3 amphis)
+GET {{baseUrl}}/api/halls?tier=amphi
+Authorization: Bearer {{adminToken}}
+
+### 4. Filter by zone "COLTECH" AND tier "medium" (expect 1)
+GET {{baseUrl}}/api/halls?zone=COLTECH&tier=medium
+Authorization: Bearer {{adminToken}}
+
+### 5. Invalid tier (expect 422)
+GET {{baseUrl}}/api/halls?tier=huge
+Authorization: Bearer {{adminToken}}
+
+### 6. No auth (expect 401)
+GET {{baseUrl}}/api/halls
+
+### 7. Suggest a new hall (expect 201, status pending)
+POST {{baseUrl}}/api/halls/suggest
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "name": "COLTECH Lab 3",
+  "zone": "COLTECH",
+  "capacityTier": "small",
+  "approxCapacityRange": "< 50"
+}
+
+### 8. Suggest duplicate (expect 409 HALL_EXISTS)
+POST {{baseUrl}}/api/halls/suggest
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "name": "Amphi 1000",
+  "zone": "Main Campus Amphis",
+  "capacityTier": "amphi",
+  "approxCapacityRange": "250+"
+}
+
+### 9. Suggest with bad capacityTier (expect 422)
+POST {{baseUrl}}/api/halls/suggest
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "name": "Bad Tier Hall",
+  "zone": "COLTECH",
+  "capacityTier": "huge",
+  "approxCapacityRange": "250+"
+}
+
+### 10. Approve the suggested hall in DB (run this SQL manually first):
+#   psql -U postgres -h localhost -d freehall -c "UPDATE halls SET status='approved' WHERE name='COLTECH Lab 3';"
+### Then list halls again (expect 6 halls now)
+GET {{baseUrl}}/api/halls
+Authorization: Bearer {{adminToken}}
+
+### 11. Get a specific hall by id (use Amphi 1000's id — copy from request 1)
+GET {{baseUrl}}/api/halls/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{adminToken}}
+
+### 12. Get non-existent hall (expect 404)
+GET {{baseUrl}}/api/halls/99999999-9999-9999-9999-999999999999
+Authorization: Bearer {{adminToken}}
+
+### 13. Get hall with bad UUID (expect 422)
+GET {{baseUrl}}/api/halls/not-a-uuid
+Authorization: Bearer {{adminToken}}

@@ -30,6 +30,5 @@ export function getScopedUniversityId(res: Response): string {
   const id = res.locals.universityId as string | undefined;
   if (!id) {
     throw new AppError('Missing university scope', 500, 'SCOPE_ERROR');
-  }
-  return id;
+  } return id;
 }

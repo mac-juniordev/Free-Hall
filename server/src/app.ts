@@ -9,6 +9,7 @@ import { env } from './config/env';
 import { errorHandler } from './middleware/errorHandler';
 import authRoutes from './modules/auth/auth.routes';
 import universitiesRoutes from './modules/universities/universities.routes';
+import hallsRoutes from './modules/halls/halls.routes';
 
 export function createApp() {
   const app = express();
@@ -25,7 +26,6 @@ export function createApp() {
   app.use(cookieParser());
   app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-  // Global rate limit
   app.use(
     rateLimit({
       windowMs: 60_000,
@@ -35,16 +35,14 @@ export function createApp() {
     })
   );
 
-  // Health probe
   app.get('/healthz', (_req, res) => {
     res.json({ ok: true, service: 'freehall-server', ts: new Date().toISOString() });
   });
 
-  // Feature routers
   app.use('/api/auth', authRoutes);
   app.use('/api/universities', universitiesRoutes);
+  app.use('/api/halls', hallsRoutes);
 
-  // Must be last
   app.use(errorHandler);
   return app;
 }
