@@ -1,0 +1,119 @@
+@baseUrl = http://localhost:4000
+@adminToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3OTQ1MjA1MjYsImV4cCI6MTc5NTEyNTMyNiwic3ViIjoiOTk5OTk5OTktOTk5OS05OTk5LTk5OTktOTk5OTk5OTk5OTk5In0.OewR7tYuCFABR5oyjzc1ZB25wjTsUkPcF2wTcKmZsrc
+@amphi1000 = f99c62b6-6fff-4085-b530-c52cf70dc87d
+@coltech101 = d47cfe4b-fb3c-4d8a-a589-4cbacc4baeda
+
+### 1. My bookings — initially empty
+GET {{baseUrl}}/api/bookings/mine
+Authorization: Bearer {{adminToken}}
+
+### 2. Claim Amphi 1000 for 1 hour (small class → warning)
+POST {{baseUrl}}/api/bookings/claim
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "hallId": "{{amphi1000}}",
+  "courseCode": "SEN301",
+  "studentCount": 30,
+  "durationMin": 60
+}
+
+### 3. Claim same hall again (should fail — 409 HALL_OCCUPIED)
+POST {{baseUrl}}/api/bookings/claim
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "hallId": "{{amphi1000}}",
+  "courseCode": "SEN302",
+  "studentCount": 50,
+  "durationMin": 60
+}
+
+### 4. List halls — Amphi 1000 now OCCUPIED
+GET {{baseUrl}}/api/halls
+Authorization: Bearer {{adminToken}}
+
+### 5. My bookings — now shows 1 active
+GET {{baseUrl}}/api/bookings/mine
+Authorization: Bearer {{adminToken}}
+
+### 6. Schedule COLTECH Room 101 for 2 hours from now
+#  Compute the ISO timestamp (e.g. today + 2h) and paste below
+POST {{baseUrl}}/api/bookings/schedule
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "hallId": "{{coltech101}}",
+  "courseCode": "SEN310",
+  "studentCount": 80,
+  "startTime": "2026-11-13T12:00:00.000Z",
+  "durationMin": 120
+}
+
+### 7. Schedule overlapping same slot (should fail — 409 TIME_CONFLICT)
+POST {{baseUrl}}/api/bookings/schedule
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "hallId": "{{coltech101}}",
+  "courseCode": "SEN311",
+  "studentCount": 40,
+  "startTime": "2026-11-13T12:30:00.000Z",
+  "durationMin": 120
+}
+
+### 8. Schedule in the PAST (should fail — 422)
+POST {{baseUrl}}/api/bookings/schedule
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "hallId": "{{coltech101}}",
+  "courseCode": "SEN312",
+  "studentCount": 40,
+  "startTime": "2020-01-01T00:00:00.000Z",
+  "durationMin": 60
+}
+
+### 9. Claim with bad duration (should fail — 422)
+POST {{baseUrl}}/api/bookings/claim
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "hallId": "{{coltech101}}",
+  "courseCode": "SEN999",
+  "studentCount": 40,
+  "durationMin": 5
+}
+
+### 10. Release the active Amphi 1000 booking (from #2)
+#  Paste the booking id from #2's response
+POST {{baseUrl}}/api/bookings/PASTE_BOOKING_ID/release
+Authorization: Bearer {{adminToken}}
+
+### 11. Halls — Amphi 1000 is FREE again
+GET {{baseUrl}}/api/halls
+Authorization: Bearer {{adminToken}}
+
+### 12. Release already-released (idempotent — should still 200)
+POST {{baseUrl}}/api/bookings/PASTE_BOOKING_ID/release
+Authorization: Bearer {{adminToken}}
+
+### 13. Attempt release of someone else's booking — build a second user to test this
+#  (skip if running single-user; else login as another CC and try)
+
+### 14. No auth claim (should fail — 401)
+POST {{baseUrl}}/api/bookings/claim
+Content-Type: application/json
+
+{
+  "hallId": "{{coltech101}}",
+  "courseCode": "SEN999",
+  "studentCount": 40,
+  "durationMin": 60
+}

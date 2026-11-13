@@ -1,6 +1,10 @@
 import { q } from '../../db/query';
 import { AppError } from '../../middleware/errorHandler';
 import { ListHallsQuery, SuggestHallInput } from './halls.schema';
+import {
+  getActiveBookingForHall,
+  getUpcomingBookingSoon,
+} from '../bookings/bookings.service';
 
 type HallRow = {
   id: string;
@@ -14,15 +18,6 @@ type HallRow = {
   created_at: string;
 };
 
-/**
- * Hall status as surfaced to the CC live board.
- *  - FREE          : no active booking right now
- *  - OCCUPIED      : an active booking is currently in progress
- *  - BOOKED_SOON   : a booking will start within the next 45 minutes
- *
- * In Phase 9c (no bookings yet) every approved hall is FREE.
- * When the Booking System lands, this becomes a SQL join against bookings.
- */
 export type HallLiveStatus = 'FREE' | 'OCCUPIED' | 'BOOKED_SOON';
 
 export type HallDto = {
@@ -39,7 +34,11 @@ export type HallDto = {
   createdAt: string;
 };
 
-function toDto(row: HallRow, liveStatus: HallLiveStatus, activeBookingId: string | null): HallDto {
+function toDto(
+  row: HallRow,
+  liveStatus: HallLiveStatus,
+  activeBookingId: string | null
+): HallDto {
   return {
     id: row.id,
     universityId: row.university_id,
@@ -55,10 +54,6 @@ function toDto(row: HallRow, liveStatus: HallLiveStatus, activeBookingId: string
   };
 }
 
-/**
- * Public interface used by the Booking System (Phase 9f) and admin review flow.
- * Returns raw row so callers can decide on their own DTO shape.
- */
 export async function findHallById(
   hallId: string,
   universityId: string
@@ -71,6 +66,21 @@ export async function findHallById(
     [hallId, universityId]
   );
   return rows[0] ?? null;
+}
+
+async function computeLive(hallId: string): Promise<{
+  liveStatus: HallLiveStatus;
+  activeBookingId: string | null;
+}> {
+  const active = await getActiveBookingForHall(hallId);
+  if (active) {
+    return { liveStatus: 'OCCUPIED', activeBookingId: active.id };
+  }
+  const soon = await getUpcomingBookingSoon(hallId);
+  if (soon) {
+    return { liveStatus: 'BOOKED_SOON', activeBookingId: null };
+  }
+  return { liveStatus: 'FREE', activeBookingId: null };
 }
 
 export async function listHalls(
@@ -99,9 +109,13 @@ export async function listHalls(
     values
   );
 
-  // Phase 9c: no bookings yet — every hall is FREE.
-  // Phase 9f will replace this with a bookings join.
-  return rows.map((r) => toDto(r, 'FREE', null));
+  const dtos = await Promise.all(
+    rows.map(async (row) => {
+      const { liveStatus, activeBookingId } = await computeLive(row.id);
+      return toDto(row, liveStatus, activeBookingId);
+    })
+  );
+  return dtos;
 }
 
 export async function getHallDetail(
@@ -112,7 +126,8 @@ export async function getHallDetail(
   if (!row || row.status !== 'approved') {
     throw new AppError('Hall not found', 404, 'NOT_FOUND');
   }
-  return toDto(row, 'FREE', null);
+  const { liveStatus, activeBookingId } = await computeLive(row.id);
+  return toDto(row, liveStatus, activeBookingId);
 }
 
 export async function suggestHall(
@@ -120,8 +135,6 @@ export async function suggestHall(
   universityId: string,
   submittedByUserId: string
 ): Promise<HallDto> {
-  // Reject duplicate (university_id, name) — DB has UNIQUE constraint, but we
-  // give a friendlier error first.
   const { rows: existing } = await q<{ id: string }>(
     `SELECT id FROM halls WHERE university_id = $1 AND LOWER(name) = LOWER($2)`,
     [universityId, input.name]

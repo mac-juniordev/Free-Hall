@@ -1,7 +1,27 @@
+import { q } from '../db/query';
+import { logger } from '../utils/logger';
+
 /**
- * Cron job — auto-cancels scheduled bookings not checked in within 15 minutes
- * of start_time. Full implementation lands in Phase 11.
+ * Runs every minute:
+ *  - Upcoming bookings where start_time + 15 min <= NOW()
+ *    AND is_checked_in = false → cancelled
+ *
+ * Rationale: scheduled bookings must be checked in within 15 min of start.
+ * Otherwise the hall is effectively wasted — cancel and free it.
  */
-export function registerAutoCancelJob(): void {
-  // placeholder — wired in Phase 11
+export async function runAutoCancelUnchecked(): Promise<void> {
+  try {
+    const { rowCount } = await q(
+      `UPDATE bookings
+          SET status = 'cancelled'
+        WHERE status = 'upcoming'
+          AND is_checked_in = FALSE
+          AND start_time + INTERVAL '15 minutes' <= NOW()`
+    );
+    if (rowCount && rowCount > 0) {
+      logger.info({ count: rowCount }, 'Auto-cancelled unchecked bookings');
+    }
+  } catch (err) {
+    logger.error({ err }, 'autoCancelUncheckedIn job failed');
+  }
 }

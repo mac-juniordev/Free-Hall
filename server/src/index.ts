@@ -3,6 +3,7 @@ import { env } from './config/env';
 import { assertDbConnected } from './db/pool';
 import { logger } from './utils/logger';
 import { initSockets } from './sockets/index';
+import { registerAllJobs } from './jobs/index';
 
 async function main() {
   try {
@@ -20,6 +21,7 @@ async function main() {
   });
 
   initSockets(server);
+  registerAllJobs();
 }
 
 main().catch((e) => {
