@@ -1,25 +1,17 @@
-import { logger } from '../utils/logger';
-import { getIo } from '../sockets/index';
 import { q } from '../db/query';
+import { logger } from '../utils/logger';
+import { getIo, isIoReady } from '../sockets/index';
+import { emitHallBookedSoon } from '../sockets/hallBoard';
 
 /**
  * Runs every minute:
- *  - Halls with a booking that starts within 45 min → broadcast BOOKED_SOON
- *  - Client-side joins hall room by universityId
- *
- * NOTE: Socket.io wiring lives in Phase 9e (realtime). Until that phase ships,
- * this job is a no-op placeholder that logs — safe to run.
+ *  - Broadcast BOOKED_SOON to hall-board rooms for bookings starting within 45 min
+ *  - Skip silently if sockets aren't ready (before initSockets runs)
  */
 export async function runBookedSoon(): Promise<void> {
-  try {
-    // Check if sockets are ready before importing emitter
-    let io;
-    try {
-      io = getIo();
-    } catch {
-      return; // sockets not initialized yet — skip silently
-    }
+  if (!isIoReady()) return;
 
+  try {
     const { rows } = await q<{
       id: string;
       university_id: string;
@@ -33,17 +25,18 @@ export async function runBookedSoon(): Promise<void> {
           AND start_time <= NOW() + INTERVAL '45 minutes'`
     );
 
+    if (rows.length === 0) return;
+
+    const io = getIo();
     for (const b of rows) {
-      io.to(`halls:${b.university_id}`).emit('hall:booked_soon', {
+      emitHallBookedSoon(io, b.university_id, {
         hallId: b.hall_id,
         bookingId: b.id,
         startsAt: b.start_time,
       });
     }
 
-    if (rows.length > 0) {
-      logger.info({ count: rows.length }, 'Booked-soon broadcasts emitted');
-    }
+    logger.info({ count: rows.length }, 'Booked-soon broadcasts emitted');
   } catch (err) {
     logger.error({ err }, 'bookedSoon job failed');
   }

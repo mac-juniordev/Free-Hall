@@ -1,6 +1,9 @@
 
 import { q, withTx } from '../../db/query.js';
 import { AppError } from '../../middleware/errorHandler.js';
+import { getIo } from '../../sockets/index.js';
+import { emitHallUpdate } from '../../sockets/hallBoard.js';
+import { logger } from '../../utils/logger.js';
 import type {
   ClaimBookingInput,
   ScheduleBookingInput,
@@ -48,12 +51,26 @@ export type BookingDto = {
   createdAt: string;
 };
 
+type LiveStatus = 'FREE' | 'OCCUPIED' | 'BOOKED_SOON';
+
 const TIER_RANGES: Record<string, [number, number]> = {
   small: [1, 60],
   medium: [50, 130],
   large: [120, 260],
   amphi: [240, 2000],
 };
+
+/**
+ * Typed wrapper around the existing database query helper.
+ * This avoids requiring q itself to be declared as a generic function.
+ */
+    async function queryRows<T>(
+    sql: string,
+    params: unknown[] = []
+    ): Promise<{ rows: T[] }> {
+    const result = await q(sql, params);
+    return result as unknown as { rows: T[] };
+    }
 
 function capacityWarning(
   tier: string,
@@ -80,11 +97,12 @@ async function getApprovedHall(
   hallId: string,
   universityId: string
 ): Promise<HallRow> {
-  const { rows } = await q<HallRow>(
+  const { rows } = await queryRows<HallRow>(
     `SELECT id, university_id, name, zone,
             capacity_tier, approx_capacity_range, status
        FROM halls
-      WHERE id = $1 AND university_id = $2`,
+      WHERE id = $1
+        AND university_id = $2`,
     [hallId, universityId]
   );
 
@@ -106,7 +124,7 @@ async function hasOverlap(
   start: Date,
   end: Date
 ): Promise<BookingRow | null> {
-  const { rows } = await q<BookingRow>(
+  const { rows } = await queryRows<BookingRow>(
     `SELECT *
        FROM bookings
       WHERE hall_id = $1
@@ -120,12 +138,52 @@ async function hasOverlap(
   return rows[0] ?? null;
 }
 
+/**
+ * Socket emitter.
+ * Socket failures must never break booking HTTP responses.
+ */
+function safeEmitHallState(
+  universityId: string,
+  booking: BookingRow,
+  liveStatus: LiveStatus
+): void {
+  try {
+    const io = getIo();
+
+    emitHallUpdate(io, universityId, {
+      hallId: booking.hall_id,
+      liveStatus,
+      activeBookingId:
+        liveStatus === 'OCCUPIED' ? booking.id : null,
+      booking:
+        liveStatus === 'OCCUPIED'
+          ? {
+              id: booking.id,
+              courseCode: booking.course_code,
+              startTime: booking.start_time,
+              endTime: booking.end_time,
+              userId: booking.user_id,
+              studentCount: booking.student_count,
+            }
+          : null,
+    });
+  } catch (err) {
+    logger.warn(
+      { err },
+      'Failed to emit hall update (socket not ready?)'
+    );
+  }
+}
+
 export async function claimBooking(
   input: ClaimBookingInput,
   universityId: string,
   userId: string
 ): Promise<{ booking: BookingDto; warning: string | null }> {
-  const hall = await getApprovedHall(input.hallId, universityId);
+  const hall = await getApprovedHall(
+    input.hallId,
+    universityId
+  );
 
   const start = new Date();
   const end = new Date(
@@ -142,7 +200,7 @@ export async function claimBooking(
     );
   }
 
-  const { rows } = await q<BookingRow>(
+  const { rows } = await queryRows<BookingRow>(
     `INSERT INTO bookings
        (university_id, hall_id, user_id, course_code,
         student_count, booking_type, is_checked_in,
@@ -160,9 +218,16 @@ export async function claimBooking(
     ]
   );
 
+  const booking = rows[0];
+
+  safeEmitHallState(universityId, booking, 'OCCUPIED');
+
   return {
-    booking: toDto(rows[0], hall.name),
-    warning: capacityWarning(hall.capacity_tier, input.studentCount),
+    booking: toDto(booking, hall.name),
+    warning: capacityWarning(
+      hall.capacity_tier,
+      input.studentCount
+    ),
   };
 }
 
@@ -171,7 +236,10 @@ export async function scheduleBooking(
   universityId: string,
   userId: string
 ): Promise<{ booking: BookingDto; warning: string | null }> {
-  const hall = await getApprovedHall(input.hallId, universityId);
+  const hall = await getApprovedHall(
+    input.hallId,
+    universityId
+  );
 
   const start = new Date(input.startTime);
 
@@ -187,6 +255,14 @@ export async function scheduleBooking(
     start.getTime() + input.durationMin * 60_000
   );
 
+  if (start.getTime() <= Date.now() || end <= start) {
+    throw new AppError(
+      'Booking must have a valid future start time and duration',
+      400,
+      'INVALID_TIME'
+    );
+  }
+
   const overlap = await hasOverlap(hall.id, start, end);
 
   if (overlap) {
@@ -199,10 +275,11 @@ export async function scheduleBooking(
 
   const now = Date.now();
   const isImmediate = start.getTime() - now < 60_000;
+
   const status = isImmediate ? 'active' : 'upcoming';
   const isCheckedIn = isImmediate;
 
-  const { rows } = await q<BookingRow>(
+  const { rows } = await queryRows<BookingRow>(
     `INSERT INTO bookings
        (university_id, hall_id, user_id, course_code,
         student_count, booking_type, is_checked_in,
@@ -222,9 +299,20 @@ export async function scheduleBooking(
     ]
   );
 
+  const booking = rows[0];
+
+  safeEmitHallState(
+    universityId,
+    booking,
+    isImmediate ? 'OCCUPIED' : 'BOOKED_SOON'
+  );
+
   return {
-    booking: toDto(rows[0], hall.name),
-    warning: capacityWarning(hall.capacity_tier, input.studentCount),
+    booking: toDto(booking, hall.name),
+    warning: capacityWarning(
+      hall.capacity_tier,
+      input.studentCount
+    ),
   };
 }
 
@@ -232,137 +320,190 @@ export async function checkinBooking(
   bookingId: string,
   userId: string
 ): Promise<BookingDto> {
-  return withTx(async (client: PoolClient) => {
-    const { rows } = await client.query<BookingRow>(
-      `SELECT *
-         FROM bookings
-        WHERE id = $1
-        FOR UPDATE`,
-      [bookingId]
-    );
-
-    const booking = rows[0];
-
-    if (!booking) {
-      throw new AppError('Booking not found', 404, 'NOT_FOUND');
-    }
-
-    if (booking.user_id !== userId) {
-      throw new AppError('Not your booking', 403, 'FORBIDDEN');
-    }
-
-    if (booking.status !== 'upcoming') {
-      throw new AppError(
-        `Cannot check in — booking is ${booking.status}`,
-        400,
-        'BAD_STATE'
+  const result = await withTx(
+    async (client: PoolClient) => {
+      const { rows } = await client.query<BookingRow>(
+        `SELECT *
+           FROM bookings
+          WHERE id = $1
+          FOR UPDATE`,
+        [bookingId]
       );
-    }
 
-    const now = Date.now();
-    const start = new Date(booking.start_time).getTime();
-    const end = new Date(booking.end_time).getTime();
+      const booking = rows[0];
 
-    if (now < start - 5 * 60_000) {
-      throw new AppError(
-        'Too early to check in — please wait until 5 minutes before start time',
-        400,
-        'TOO_EARLY'
+      if (!booking) {
+        throw new AppError(
+          'Booking not found',
+          404,
+          'NOT_FOUND'
+        );
+      }
+
+      if (booking.user_id !== userId) {
+        throw new AppError(
+          'Not your booking',
+          403,
+          'FORBIDDEN'
+        );
+      }
+
+      if (booking.status !== 'upcoming') {
+        throw new AppError(
+          `Cannot check in — booking is ${booking.status}`,
+          400,
+          'BAD_STATE'
+        );
+      }
+
+      const now = Date.now();
+      const start = new Date(booking.start_time).getTime();
+      const end = new Date(booking.end_time).getTime();
+
+      if (now < start - 5 * 60_000) {
+        throw new AppError(
+          'Too early to check in — please wait until 5 minutes before start time',
+          400,
+          'TOO_EARLY'
+        );
+      }
+
+      if (now > end) {
+        throw new AppError(
+          'Booking window has already passed',
+          400,
+          'EXPIRED'
+        );
+      }
+
+      if (now > start + 15 * 60_000) {
+        throw new AppError(
+          'Check-in window closed — booking was auto-cancelled',
+          400,
+          'CHECKIN_EXPIRED'
+        );
+      }
+
+      const { rows: updated } =
+        await client.query<BookingRow>(
+          `UPDATE bookings
+              SET is_checked_in = TRUE,
+                  status = 'active'
+            WHERE id = $1
+            RETURNING *`,
+          [bookingId]
+        );
+
+      const hallName = await getHallName(
+        client,
+        updated[0].hall_id
       );
+
+      return {
+        booking: toDto(updated[0], hallName),
+        raw: updated[0],
+      };
     }
+  );
 
-    if (now > end) {
-      throw new AppError(
-        'Booking window has already passed',
-        400,
-        'EXPIRED'
-      );
-    }
+  safeEmitHallState(
+    result.raw.university_id,
+    result.raw,
+    'OCCUPIED'
+  );
 
-    if (now > start + 15 * 60_000) {
-      throw new AppError(
-        'Check-in window closed — booking was auto-cancelled',
-        400,
-        'CHECKIN_EXPIRED'
-      );
-    }
-
-    const { rows: updated } = await client.query<BookingRow>(
-      `UPDATE bookings
-          SET is_checked_in = TRUE,
-              status = 'active'
-        WHERE id = $1
-        RETURNING *`,
-      [bookingId]
-    );
-
-    const hallName = await getHallName(
-      client,
-      updated[0].hall_id
-    );
-
-    return toDto(updated[0], hallName);
-  });
+  return result.booking;
 }
 
 export async function releaseBooking(
   bookingId: string,
   userId: string
 ): Promise<BookingDto> {
-  return withTx(async (client: PoolClient) => {
-    const { rows } = await client.query<BookingRow>(
-      `SELECT *
-         FROM bookings
-        WHERE id = $1
-        FOR UPDATE`,
-      [bookingId]
-    );
-
-    const booking = rows[0];
-
-    if (!booking) {
-      throw new AppError('Booking not found', 404, 'NOT_FOUND');
-    }
-
-    if (booking.user_id !== userId) {
-      throw new AppError('Not your booking', 403, 'FORBIDDEN');
-    }
-
-    if (
-      booking.status === 'completed' ||
-      booking.status === 'cancelled'
-    ) {
-      const hallName = await getHallName(
-        client,
-        booking.hall_id
+  const result = await withTx(
+    async (client: PoolClient) => {
+      const { rows } = await client.query<BookingRow>(
+        `SELECT *
+           FROM bookings
+          WHERE id = $1
+          FOR UPDATE`,
+        [bookingId]
       );
 
-      return toDto(booking, hallName);
+      const booking = rows[0];
+
+      if (!booking) {
+        throw new AppError(
+          'Booking not found',
+          404,
+          'NOT_FOUND'
+        );
+      }
+
+      if (booking.user_id !== userId) {
+        throw new AppError(
+          'Not your booking',
+          403,
+          'FORBIDDEN'
+        );
+      }
+
+      if (
+        booking.status === 'completed' ||
+        booking.status === 'cancelled'
+      ) {
+        const hallName = await getHallName(
+          client,
+          booking.hall_id
+        );
+
+        return {
+          booking: toDto(booking, hallName),
+          raw: booking,
+          changed: false,
+        };
+      }
+
+      const { rows: updated } =
+        await client.query<BookingRow>(
+          `UPDATE bookings
+              SET status = 'completed',
+                  end_time = LEAST(end_time, NOW())
+            WHERE id = $1
+            RETURNING *`,
+          [bookingId]
+        );
+
+      const hallName = await getHallName(
+        client,
+        updated[0].hall_id
+      );
+
+      return {
+        booking: toDto(updated[0], hallName),
+        raw: updated[0],
+        changed: true,
+      };
     }
+  );
 
-    const { rows: updated } = await client.query<BookingRow>(
-      `UPDATE bookings
-          SET status = 'completed',
-              end_time = LEAST(end_time, NOW())
-        WHERE id = $1
-        RETURNING *`,
-      [bookingId]
+  if (result.changed) {
+    safeEmitHallState(
+      result.raw.university_id,
+      result.raw,
+      'FREE'
     );
+  }
 
-    const hallName = await getHallName(
-      client,
-      updated[0].hall_id
-    );
-
-    return toDto(updated[0], hallName);
-  });
+  return result.booking;
 }
 
 export async function listMyBookings(
   userId: string,
   universityId: string
 ): Promise<BookingDto[]> {
-  const { rows } = await q<BookingRow & { hall_name: string }>(
+  const { rows } = await queryRows<
+    BookingRow & { hall_name: string }
+  >(
     `SELECT b.*, h.name AS hall_name
        FROM bookings b
        JOIN halls h ON h.id = b.hall_id
@@ -373,7 +514,9 @@ export async function listMyBookings(
     [userId, universityId]
   );
 
-  return rows.map((row) => toDto(row, row.hall_name));
+  return rows.map((row) =>
+    toDto(row, row.hall_name)
+  );
 }
 
 async function getHallName(
@@ -381,7 +524,9 @@ async function getHallName(
   hallId: string
 ): Promise<string> {
   const { rows } = await client.query<{ name: string }>(
-    `SELECT name FROM halls WHERE id = $1`,
+    `SELECT name
+       FROM halls
+      WHERE id = $1`,
     [hallId]
   );
 
@@ -417,7 +562,7 @@ export async function getActiveBookingForHall(
   end_time: string;
   status: string;
 } | null> {
-  const { rows } = await q<{
+  const { rows } = await queryRows<{
     id: string;
     start_time: string;
     end_time: string;
@@ -439,7 +584,7 @@ export async function getActiveBookingForHall(
 export async function getUpcomingBookingSoon(
   hallId: string
 ): Promise<{ id: string; start_time: string } | null> {
-  const { rows } = await q<{
+  const { rows } = await queryRows<{
     id: string;
     start_time: string;
   }>(
