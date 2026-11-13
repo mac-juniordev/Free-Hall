@@ -10,6 +10,7 @@ import { errorHandler } from './middleware/errorHandler';
 import authRoutes from './modules/auth/auth.routes';
 import universitiesRoutes from './modules/universities/universities.routes';
 import hallsRoutes from './modules/halls/halls.routes';
+import settingsRoutes from './modules/settings/settings.routes';
 
 export function createApp() {
   const app = express();
@@ -42,6 +43,7 @@ export function createApp() {
   app.use('/api/auth', authRoutes);
   app.use('/api/universities', universitiesRoutes);
   app.use('/api/halls', hallsRoutes);
+  app.use('/api/settings', settingsRoutes);
 
   app.use(errorHandler);
   return app;
