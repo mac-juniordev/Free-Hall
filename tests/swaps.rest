@@ -1,0 +1,120 @@
+@baseUrl = http://localhost:4000
+@adminToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3OTQ1MjA1MjYsImV4cCI6MTc5NTEyNTMyNiwic3ViIjoiOTk5OTk5OTktOTk5OS05OTk5LTk5OTktOTk5OTk5OTk5OTk5In0.OewR7tYuCFABR5oyjzc1ZB25wjTsUkPcF2wTcKmZsrc
+@bobToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3OTQ1ODMxNzMsImV4cCI6MTc5NTE4Nzk3Mywic3ViIjoiY2RlZWQ0YzEtOWQzNS00MTViLWI2ZGMtOWIzNTU2NTAxMzdmIn0.tVm2Be7BQgCNddgfrmvGlwgyHNAvR8NMLgAWsb7XNTQ
+
+@amphi1000 = f99c62b6-6fff-4085-b530-c52cf70dc87d
+@coltech101 = d47cfe4b-fb3c-4d8a-a589-4cbacc4baeda
+
+### 1. Login as Bob CC (get bobToken)
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "matricule": "UBA23E0002",
+  "password": "SwapTest@2025"
+}
+
+### SETUP: Bob claims COLTECH Room 101 (small class in medium hall)
+POST {{baseUrl}}/api/bookings/claim
+Authorization: Bearer {{bobToken}}
+Content-Type: application/json
+
+{
+  "hallId": "{{coltech101}}",
+  "courseCode": "BOB101",
+  "studentCount": 60,
+  "durationMin": 180
+}
+
+### SETUP: Admin claims Amphi 1000 (BIG class in amphi — they need smaller)
+POST {{baseUrl}}/api/bookings/claim
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "hallId": "{{amphi1000}}",
+  "courseCode": "ADM301",
+  "studentCount": 500,
+  "durationMin": 180
+}
+
+### 2. Admin requests swap: their Amphi 1000 (500 students) → Bob's COLTECH 101 (60 students)
+# Note: this doesn't match the "requester > target student count" rule... but
+# the rule requires REQUESTER's class to be LARGER than target's, which IS true here
+# (500 > 60). Swap ID needs the actual booking IDs from setup responses.
+POST {{baseUrl}}/api/swaps
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "requesterBookingId": "688617f3-b0d8-46be-80ca-90468f647898",
+  "targetBookingId": "PASTE_BOB_BOOKING_ID"
+}
+
+### 3. Bob sees incoming swap
+GET {{baseUrl}}/api/swaps/mine
+Authorization: Bearer {{bobToken}}
+
+### 4. Bob accepts the swap
+POST {{baseUrl}}/api/swaps/PASTE_SWAP_ID/accept
+Authorization: Bearer {{bobToken}}
+
+### 5. Verify halls swapped: Bob now in Amphi 1000, Admin now in COLTECH 101
+GET {{baseUrl}}/api/bookings/mine
+Authorization: Bearer {{bobToken}}
+
+GET {{baseUrl}}/api/bookings/mine
+Authorization: Bearer {{adminToken}}
+
+### 6. Halls list — verify hall states updated
+GET {{baseUrl}}/api/halls
+Authorization: Bearer {{adminToken}}
+
+### 7. Request swap with SAME hall (should fail — 400 SAME_HALL)
+POST {{baseUrl}}/api/swaps
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "requesterBookingId": "PASTE_ADMIN_BOOKING_ID",
+  "targetBookingId": "PASTE_ADMIN_BOOKING_ID"
+}
+
+### 8. Request swap where requester's class is SMALLER (should fail — 400 SIZE_MISMATCH)
+# Bob has 60 students now, admin has 500. Try Bob → Admin.
+POST {{baseUrl}}/api/swaps
+Authorization: Bearer {{bobToken}}
+Content-Type: application/json
+
+{
+  "requesterBookingId": "PASTE_BOB_BOOKING_ID",
+  "targetBookingId": "PASTE_ADMIN_BOOKING_ID"
+}
+
+### 9. Create a second swap request for reject test
+# (Setup again — clear bookings first via SQL or use new halls)
+POST {{baseUrl}}/api/swaps
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "requesterBookingId": "PASTE_ADMIN_NEW_BOOKING_ID",
+  "targetBookingId": "PASTE_BOB_NEW_BOOKING_ID"
+}
+
+### 10. Bob rejects the swap
+POST {{baseUrl}}/api/swaps/PASTE_SWAP_ID_2/reject
+Authorization: Bearer {{bobToken}}
+
+### 11. Invalid UUID in path (should fail — 422)
+POST {{baseUrl}}/api/swaps/not-a-uuid/accept
+Authorization: Bearer {{bobToken}}
+
+### 12. No auth (should fail — 401)
+POST {{baseUrl}}/api/swaps
+Content-Type: application/json
+
+{
+  "requesterBookingId": "{{amphi1000}}",
+  "targetBookingId": "{{coltech101}}"
+}
