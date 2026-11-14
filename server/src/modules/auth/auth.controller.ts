@@ -35,3 +35,21 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
     next(err);
   }
 }
+
+export async function postForgotPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await service.forgotPassword(req.body);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function postResetPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await service.resetPassword(req.body);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}

@@ -1,9 +1,5 @@
 import { z } from 'zod';
 
-/**
- * Loose UUID format check — accepts any hex UUID shape including nil
- * and non-RFC-4122 variants (like our seed: 11111111-1111-1111-1111-111111111111).
- */
 const uuidLoose = z
   .string()
   .regex(
@@ -41,5 +37,23 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().email('Enter a valid email').max(150),
+});
+
+export const resetPasswordSchema = z
+  .object({
+    email: z.string().trim().email('Enter a valid email').max(150),
+    otp: z.string().trim().regex(/^\d{6}$/, 'OTP must be 6 digits'),
+    newPassword: passwordRule,
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    path: ['confirmPassword'],
+    message: 'Passwords do not match',
+  });
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;

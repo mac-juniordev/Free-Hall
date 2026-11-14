@@ -1,0 +1,99 @@
+@baseUrl = http://localhost:4000
+
+### 1. Forgot password for real user (admin)
+# Check server terminal for the logged OTP — dev mode prints it
+POST {{baseUrl}}/api/auth/forgot-password
+Content-Type: application/json
+
+{
+  "email": "admin@freehall.cm"
+}
+
+### 2. Forgot password for NON-EXISTENT email (same generic response)
+POST {{baseUrl}}/api/auth/forgot-password
+Content-Type: application/json
+
+{
+  "email": "nobody@example.com"
+}
+
+### 3. Wrong OTP (should fail — 400 INVALID_OTP)
+POST {{baseUrl}}/api/auth/reset-password
+Content-Type: application/json
+
+{
+  "email": "admin@freehall.cm",
+  "otp": "000000",
+  "newPassword": "NewPass1234",
+  "confirmPassword": "NewPass1234"
+}
+
+### 4. Reset with real OTP (copy from server terminal)
+POST {{baseUrl}}/api/auth/reset-password
+Content-Type: application/json
+
+{
+  "email": "admin@freehall.cm",
+  "otp": "PASTE_OTP_HERE",
+  "newPassword": "NewPass1234",
+  "confirmPassword": "NewPass1234"
+}
+
+### 5. Login with new password (should succeed)
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "matricule": "UBa23E0001",
+  "password": "NewPass1234"
+}
+
+### 6. Login with OLD password (should fail — 401)
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "matricule": "UBa23E0001",
+  "password": "FreeHall@2025"
+}
+
+### 7. Reuse the same OTP (should fail — 400 INVALID_OTP, one-time use)
+POST {{baseUrl}}/api/auth/reset-password
+Content-Type: application/json
+
+{
+  "email": "admin@freehall.cm",
+  "otp": "PASTE_OTP_HERE",
+  "newPassword": "AnotherPass1234",
+  "confirmPassword": "AnotherPass1234"
+}
+
+### 8. Weak new password (should fail — 422)
+POST {{baseUrl}}/api/auth/reset-password
+Content-Type: application/json
+
+{
+  "email": "admin@freehall.cm",
+  "otp": "123456",
+  "newPassword": "short",
+  "confirmPassword": "short"
+}
+
+### 9. Mismatched confirm (should fail — 422)
+POST {{baseUrl}}/api/auth/reset-password
+Content-Type: application/json
+
+{
+  "email": "admin@freehall.cm",
+  "otp": "123456",
+  "newPassword": "ValidPass123",
+  "confirmPassword": "DifferentPass123"
+}
+
+### 10. Rate limit test — run 4 times quickly, 4th should fail with 429
+POST {{baseUrl}}/api/auth/forgot-password
+Content-Type: application/json
+
+{
+  "email": "admin@freehall.cm"
+}
