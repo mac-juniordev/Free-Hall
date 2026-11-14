@@ -1,11 +1,14 @@
-import { lazy, Suspense} from 'react';
-import type {ReactNode} from 'react';
+import { lazy, Suspense } from 'react';
+import type {ReactNode} from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './stores/auth';
 import { LoginPage } from './routes/Login';
 import { RegisterPage } from './routes/Register';
 import { PendingPage } from './routes/Pending';
+// import { SuspendedPage } from './routes/Suspended';
 import { DashboardPage } from './routes/Dashboard';
+import { BookingsPage } from './routes/Bookings';
+// import { SwapsPage } from './routes/Swaps';
 
 const AdminPage = lazy(() =>
   import('./routes/Admin').then((m) => ({ default: m.AdminPage }))
@@ -29,7 +32,6 @@ function RequireRole({
   children: ReactNode;
 }) {
   const user = useAuth((s) => s.user);
-  // Silent redirect — no error page, no hint that /path exists
   if (!user || user.role !== role) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
@@ -46,13 +48,12 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Public */}
         <Route path="/" element={<RootRedirect />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/pending" element={<PendingPage />} />
+        {/* <Route path="/suspended" element={<SuspendedPage />} /> */}
 
-        {/* Protected — CC / assistant / super_admin */}
         <Route
           path="/dashboard"
           element={
@@ -61,8 +62,23 @@ export default function App() {
             </RequireAuth>
           }
         />
+        <Route
+          path="/bookings"
+          element={
+            <RequireAuth>
+              <BookingsPage />
+            </RequireAuth>
+          }
+        />
+        {/* <Route
+          path="/swaps"
+          element={
+            <RequireAuth>
+              <SwapsPage />
+            </RequireAuth>
+          }
+        /> */}
 
-        {/* Hidden admin — no nav link, URL from env */}
         <Route
           path={ADMIN_PATH}
           element={
@@ -76,7 +92,6 @@ export default function App() {
           }
         />
 
-        {/* Catch-all → login */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
