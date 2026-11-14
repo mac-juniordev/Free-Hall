@@ -1,6 +1,17 @@
+import { logger } from '../utils/logger';
+import { expireSponsors } from '../modules/sponsors/sponsors.service';
+
 /**
- * Cron job — deactivates expired sponsors. Full implementation lands in Phase 14.
+ * Runs hourly:
+ *  - Deactivates sponsors whose expires_at has passed
  */
-export function registerSponsorExpiryJob(): void {
-  // placeholder — wired in Phase 14
-}
+export async function runSponsorExpiry(): Promise<void> {
+  try {
+    const count = await expireSponsors();
+    if (count > 0) {
+      logger.info({ count }, 'Expired sponsors deactivated');
+    }
+  } catch (err) {
+    logger.error({ err }, 'sponsorExpiry job failed');
+  }
+} 

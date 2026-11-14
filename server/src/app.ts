@@ -14,6 +14,7 @@ import settingsRoutes from './modules/settings/settings.routes';
 import bookingsRoutes from './modules/bookings/bookings.routes';
 import swapsRoutes from './modules/swaps/swaps.routes';
 import adminRoutes from './modules/admin/admin.routes';
+import sponsorsRoutes from './modules/sponsors/sponsors.routes';
 
 export function createApp() {
   const app = express();
@@ -45,6 +46,7 @@ export function createApp() {
   app.use('/api/bookings', bookingsRoutes);
   app.use('/api/swaps', swapsRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api/sponsors', sponsorsRoutes);
 
   app.use(errorHandler);
   return app;
