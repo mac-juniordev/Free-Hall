@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../stores/auth';
 import { useNavigate } from 'react-router-dom';
 import { HallCard } from '../components/HallCard';
@@ -7,26 +8,48 @@ import { ClaimDrawer } from '../components/ClaimDrawer';
 import { ActiveBookingBanner } from '../components/ActiveBookingBanner';
 import { SwapRequestModal } from '../components/SwapRequestModal';
 import { Layout } from '../components/Layout';
-import { fetchHalls, fetchMyBookings, releaseBooking } from '../lib/api-halls';
+import {
+  fetchHalls,
+  fetchMyBookings,
+  releaseBooking,
+} from '../lib/api-halls';
 import { fetchMySwaps } from '../lib/api-swaps';
 import {
   useSocket,
   type HallUpdatePayload,
   type SwapNewPayload,
-  type SwapAcceptedPayload,
-  type SwapRejectedPayload,
 } from '../hooks/useSocket';
 import { extractError } from '../lib/api';
-import { playNotificationChime, playAcceptedChime } from '../lib/sound';
+import {
+  playNotificationChime,
+  playAcceptedChime,
+} from '../lib/sound';
 import type { Booking, Hall } from '../types/api';
-import { CheckCircle2, X, Building2, Users, Clock, ArrowLeftRight } from 'lucide-react';
+import {
+  CheckCircle2,
+  X,
+  Building2,
+  Users,
+  Clock,
+  ArrowLeftRight,
+} from 'lucide-react';
 import clsx from 'clsx';
 
-type Toast = { kind: 'success' | 'warning' | 'swap'; text: string };
+type Toast = {
+  kind: 'success' | 'warning' | 'swap';
+  text: string;
+};
 
 type ModalMode =
-  | { type: 'from-hall'; targetBookingId: string; targetHallName: string }
-  | { type: 'from-booking'; requesterBookingId: string }
+  | {
+      type: 'from-hall';
+      targetBookingId: string;
+      targetHallName: string;
+    }
+  | {
+      type: 'from-booking';
+      requesterBookingId: string;
+    }
   | null;
 
 export function DashboardPage() {
@@ -35,7 +58,6 @@ export function DashboardPage() {
 
   const [halls, setHalls] = useState<Hall[]>([]);
   const [myBookings, setMyBookings] = useState<Booking[]>([]);
-  const [allActiveBookings, setAllActiveBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -51,17 +73,26 @@ export function DashboardPage() {
   const [swapModal, setSwapModal] = useState<ModalMode>(null);
   const [swapTargets, setSwapTargets] = useState<Booking[]>([]);
 
-  const activeBooking = myBookings.find((b) => b.status === 'active');
+  const activeBooking = myBookings.find(
+    (booking) => booking.status === 'active'
+  );
 
-  async function loadAll(showLoader = true) {
-    if (showLoader) setLoading(true);
-    else setRefreshing(true);
+  // Load halls and the current user's bookings.
+  const loadAll = useCallback(async (showLoader = true) => {
+    if (showLoader) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
+
     setError('');
+
     try {
       const [hallsData, bookingsData] = await Promise.all([
         fetchHalls(),
         fetchMyBookings(),
       ]);
+
       setHalls(hallsData);
       setMyBookings(bookingsData);
     } catch (err) {
@@ -70,176 +101,282 @@ export function DashboardPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }
-
-  useEffect(() => {
-    void loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Initial loading. Defer the request to a microtask so the effect
+  // does not synchronously trigger state updates.
+  useEffect(() => {
+    let cancelled = false;
+
+    void Promise.resolve().then(() => {
+      if (!cancelled) {
+        void loadAll();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAll]);
+
+  // Socket event handlers.
   useSocket({
-    onConnect: () => setSocketLive(true),
-    onDisconnect: () => setSocketLive(false),
+    onConnect: () => {
+      setSocketLive(true);
+    },
+
+    onDisconnect: () => {
+      setSocketLive(false);
+    },
+
     onHallUpdate: (payload: HallUpdatePayload) => {
       setHalls((prev) =>
-        prev.map((h) =>
-          h.id === payload.hallId
+        prev.map((hall) =>
+          hall.id === payload.hallId
             ? {
-                ...h,
+                ...hall,
                 liveStatus: payload.liveStatus,
                 activeBookingId: payload.activeBookingId,
               }
-            : h
+            : hall
         )
       );
     },
+
     onSwapNew: (payload: SwapNewPayload) => {
       playNotificationChime();
+
       setToast({
         kind: 'swap',
         text: `${payload.requesterBooking.userFullName} wants to swap ${payload.requesterBooking.hallName} → ${payload.targetBooking.hallName}`,
       });
     },
-    onSwapAccepted: (_payload: SwapAcceptedPayload) => {
+
+    onSwapAccepted: () => {
       playAcceptedChime();
-      setToast({ kind: 'success', text: 'Your swap request was accepted!' });
+
+      setToast({
+        kind: 'success',
+        text: 'Your swap request was accepted!',
+      });
+
       void loadAll(false);
     },
-    onSwapRejected: (_payload: SwapRejectedPayload) => {
-      setToast({ kind: 'warning', text: 'Your swap request was declined.' });
+
+    onSwapRejected: () => {
+      setToast({
+        kind: 'warning',
+        text: 'Your swap request was declined.',
+      });
     },
   });
 
+  // Filter halls.
   const filtered = useMemo(() => {
-    return halls.filter((h) => {
-      if (tier !== 'all' && h.capacityTier !== tier) return false;
-      if (zone && h.zone !== zone) return false;
+    return halls.filter((hall) => {
+      if (tier !== 'all' && hall.capacityTier !== tier) {
+        return false;
+      }
+
+      if (zone && hall.zone !== zone) {
+        return false;
+      }
+
       return true;
     });
   }, [halls, tier, zone]);
 
+  // Available zones.
   const zones = useMemo(
-    () => Array.from(new Set(halls.map((h) => h.zone))).sort(),
+    () => Array.from(new Set(halls.map((hall) => hall.zone))).sort(),
     [halls]
   );
 
+  // Dashboard statistics.
   const stats = useMemo(() => {
-    const free = halls.filter((h) => h.liveStatus === 'FREE').length;
-    const occupied = halls.filter((h) => h.liveStatus === 'OCCUPIED').length;
-    const soon = halls.filter((h) => h.liveStatus === 'BOOKED_SOON').length;
-    return { free, occupied, soon, total: halls.length };
+    const free = halls.filter(
+      (hall) => hall.liveStatus === 'FREE'
+    ).length;
+
+    const occupied = halls.filter(
+      (hall) => hall.liveStatus === 'OCCUPIED'
+    ).length;
+
+    const soon = halls.filter(
+      (hall) => hall.liveStatus === 'BOOKED_SOON'
+    ).length;
+
+    return {
+      free,
+      occupied,
+      soon,
+      total: halls.length,
+    };
   }, [halls]);
 
+  // Automatically dismiss toast notifications.
   useEffect(() => {
-    if (toast) {
-      const t = setTimeout(() => setToast(null), 5000);
-      return () => clearTimeout(t);
-    }
+    if (!toast) return;
+
+    const timer = setTimeout(() => {
+      setToast(null);
+    }, 5000);
+
+    return () => clearTimeout(timer);
   }, [toast]);
 
+  // End an active class.
   async function handleEndClass() {
     if (!activeBooking) return;
+
     setEndingId(activeBooking.id);
+
     try {
       await releaseBooking(activeBooking.id);
-      setToast({ kind: 'success', text: 'Hall freed. Others can claim it now.' });
+
+      setToast({
+        kind: 'success',
+        text: 'Hall freed. Others can claim it now.',
+      });
+
       await loadAll(false);
     } catch (err) {
-      setToast({ kind: 'warning', text: extractError(err) });
+      setToast({
+        kind: 'warning',
+        text: extractError(err),
+      });
     } finally {
       setEndingId(null);
     }
   }
 
-  function handleClaimSuccess(result: { warning: string | null }) {
+  // Handle successful hall claim.
+  function handleClaimSuccess(result: {
+    warning: string | null;
+  }) {
     if (result.warning) {
-      setToast({ kind: 'warning', text: result.warning });
+      setToast({
+        kind: 'warning',
+        text: result.warning,
+      });
     } else {
-      setToast({ kind: 'success', text: 'Hall claimed. Happy teaching!' });
+      setToast({
+        kind: 'success',
+        text: 'Hall claimed. Happy teaching!',
+      });
     }
+
     void loadAll(false);
   }
 
-  // Entry point A — from an occupied hall card
+  // Fetch available active bookings for swap selection.
+  async function fetchAllActiveBookingsForHall(): Promise<Booking[]> {
+    const [hallsData, my] = await Promise.all([
+      fetchHalls(),
+      fetchMyBookings(),
+    ]);
+
+    const myBookingIds = new Set(my.map((booking) => booking.id));
+
+    const others: Booking[] = [];
+
+    for (const hall of hallsData) {
+      if (
+        hall.liveStatus === 'OCCUPIED' &&
+        hall.activeBookingId &&
+        !myBookingIds.has(hall.activeBookingId)
+      ) {
+        others.push({
+          id: hall.activeBookingId,
+          universityId: hall.universityId,
+          hallId: hall.id,
+          hallName: hall.name,
+          userId: '',
+          courseCode: '',
+          studentCount: 0,
+          bookingType: 'instant',
+          isCheckedIn: true,
+          startTime: hall.createdAt,
+          endTime: hall.createdAt,
+          status: 'active',
+          createdAt: hall.createdAt,
+        });
+      }
+    }
+
+    return [
+      ...my.filter(
+        (booking) =>
+          booking.status === 'active' ||
+          booking.status === 'upcoming'
+      ),
+      ...others,
+    ];
+  }
+
+  // Open swap modal from an occupied hall.
   async function openSwapFromHall(hall: Hall) {
     if (!hall.activeBookingId) {
-      setToast({ kind: 'warning', text: 'This hall has no active booking to swap with.' });
+      setToast({
+        kind: 'warning',
+        text: 'This hall has no active booking to swap with.',
+      });
       return;
     }
-    // Fetch all active bookings so we can show target details
+
     try {
-      const all = await fetchAllActiveBookingsForHall(hall.id, hall.activeBookingId);
+      const all = await fetchAllActiveBookingsForHall();
+
       setSwapTargets(all);
+
       setSwapModal({
         type: 'from-hall',
         targetBookingId: hall.activeBookingId,
         targetHallName: hall.name,
       });
     } catch (err) {
-      setToast({ kind: 'warning', text: extractError(err) });
+      setToast({
+        kind: 'warning',
+        text: extractError(err),
+      });
     }
   }
 
-  // Entry point B — from the active booking banner
+  // Open swap modal from the active booking banner.
   async function openSwapFromBooking() {
     if (!activeBooking) return;
+
     try {
-      const all = await fetchAllActiveBookingsForHall(null, null);
+      const all = await fetchAllActiveBookingsForHall();
+
       setSwapTargets(all);
-      setSwapModal({ type: 'from-booking', requesterBookingId: activeBooking.id });
+
+      setSwapModal({
+        type: 'from-booking',
+        requesterBookingId: activeBooking.id,
+      });
     } catch (err) {
-      setToast({ kind: 'warning', text: extractError(err) });
+      setToast({
+        kind: 'warning',
+        text: extractError(err),
+      });
     }
   }
 
-  // Helper — pulls "all active bookings" by scanning the hall list's activeBookingIds
-  // and reading /api/bookings/mine for the current user (the /api/halls endpoint
-  // returns activeBookingId per hall; we need the booking row itself).
-  async function fetchAllActiveBookingsForHall(
-    _hallId: string | null,
-    _bookingId: string | null
-  ): Promise<Booking[]> {
-    // Fetch fresh hall list — this populates activeBookingId fields
-    const [hallsData, my] = await Promise.all([fetchHalls(), fetchMyBookings()]);
-
-    // Build a map of active bookings on the board
-    const bookingsMap = new Map<string, Booking>();
-    for (const b of my) bookingsMap.set(b.id, b);
-
-    // Since we don't have a bulk endpoint, construct synthetic Booking rows
-    // from hall metadata for OTHER users' active bookings
-    const others: Booking[] = [];
-    for (const h of hallsData) {
-      if (h.liveStatus === 'OCCUPIED' && h.activeBookingId && !bookingsMap.has(h.activeBookingId)) {
-        others.push({
-          id: h.activeBookingId,
-          universityId: h.universityId,
-          hallId: h.id,
-          hallName: h.name,
-          userId: '',
-          courseCode: '',
-          studentCount: 0,
-          bookingType: 'instant',
-          isCheckedIn: true,
-          startTime: h.createdAt,
-          endTime: h.createdAt,
-          status: 'active',
-          createdAt: h.createdAt,
-        });
-      }
-    }
-
-    return [...my.filter((b) => b.status === 'active' || b.status === 'upcoming'), ...others];
-  }
-
+  // Check for incoming swap notifications.
   async function refreshSwaps() {
     try {
       const data = await fetchMySwaps();
-      if (data.incoming.some((s) => s.status === 'pending')) {
+
+      if (
+        data.incoming.some(
+          (swap) => swap.status === 'pending'
+        )
+      ) {
         playNotificationChime();
       }
     } catch {
-      /* silent */
+      // Silently ignore swap refresh errors.
     }
   }
 
@@ -247,7 +384,7 @@ export function DashboardPage() {
     <Layout
       socketLive={socketLive}
       title={`Welcome, ${user?.fullName?.split(' ')[0] ?? 'CC'}`}
-      subtitle={`${user?.department} · ${user?.level}`}
+      subtitle={`${user?.department ?? ''} · ${user?.level ?? ''}`}
       primaryAction={{
         label: refreshing ? 'Refreshing…' : 'Refresh',
         onClick: () => {
@@ -256,6 +393,7 @@ export function DashboardPage() {
         },
       }}
     >
+      {/* Active booking */}
       {activeBooking && (
         <div className="mb-5">
           <ActiveBookingBanner
@@ -263,6 +401,7 @@ export function DashboardPage() {
             onEndClass={handleEndClass}
             ending={endingId === activeBooking.id}
           />
+
           <button
             onClick={openSwapFromBooking}
             className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#0F766E] hover:underline"
@@ -273,13 +412,38 @@ export function DashboardPage() {
         </div>
       )}
 
+      {/* Statistics */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard icon={<Building2 size={18} />} label="Total halls" value={stats.total} tone="neutral" />
-        <StatCard icon={<CheckCircle2 size={18} />} label="Free now" value={stats.free} tone="free" />
-        <StatCard icon={<Clock size={18} />} label="Occupied" value={stats.occupied} tone="occupied" />
-        <StatCard icon={<Users size={18} />} label="Booked soon" value={stats.soon} tone="soon" />
+        <StatCard
+          icon={<Building2 size={18} />}
+          label="Total halls"
+          value={stats.total}
+          tone="neutral"
+        />
+
+        <StatCard
+          icon={<CheckCircle2 size={18} />}
+          label="Free now"
+          value={stats.free}
+          tone="free"
+        />
+
+        <StatCard
+          icon={<Clock size={18} />}
+          label="Occupied"
+          value={stats.occupied}
+          tone="occupied"
+        />
+
+        <StatCard
+          icon={<Users size={18} />}
+          label="Booked soon"
+          value={stats.soon}
+          tone="soon"
+        />
       </div>
 
+      {/* Filters */}
       <div className="mb-5 rounded-lg border border-[#DCE1E7] bg-white p-4 shadow-sm">
         <FilterBar
           tier={tier}
@@ -290,22 +454,29 @@ export function DashboardPage() {
         />
       </div>
 
+      {/* Error */}
       {error && (
         <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
 
+      {/* Halls */}
       {loading ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3, 4, 5, 6].map((i) => (
-            <div key={i} className="h-44 animate-pulse rounded-lg border border-[#DCE1E7] bg-white" />
+            <div
+              key={i}
+              className="h-44 animate-pulse rounded-lg border border-[#DCE1E7] bg-white"
+            />
           ))}
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-lg border border-[#DCE1E7] bg-white p-10 text-center shadow-sm">
           <p className="text-sm text-[#6B7280]">
-            {halls.length === 0 ? 'No halls yet for your university.' : 'No halls match your filters.'}
+            {halls.length === 0
+              ? 'No halls yet for your university.'
+              : 'No halls match your filters.'}
           </p>
         </div>
       ) : (
@@ -315,30 +486,49 @@ export function DashboardPage() {
               key={hall.id}
               hall={hall}
               onClaim={setClaimingHall}
-              onViewActive={activeBooking ? openSwapFromHall : undefined}
+              onViewActive={
+                activeBooking ? openSwapFromHall : undefined
+              }
             />
           ))}
         </div>
       )}
 
+      {/* Toast */}
       {toast && (
         <div className="fixed inset-x-0 bottom-20 z-50 mx-auto max-w-md px-4 lg:bottom-4">
           <div
             className={clsx(
               'flex items-start gap-2 rounded-lg px-4 py-3 shadow-lg',
-              toast.kind === 'success' && 'border border-green-200 bg-green-50',
-              toast.kind === 'warning' && 'border border-amber-200 bg-amber-50',
-              toast.kind === 'swap' && 'border border-[#0F766E] bg-[#F0FDFA]'
+              toast.kind === 'success' &&
+                'border border-green-200 bg-green-50',
+              toast.kind === 'warning' &&
+                'border border-amber-200 bg-amber-50',
+              toast.kind === 'swap' &&
+                'border border-[#0F766E] bg-[#F0FDFA]'
             )}
           >
             {toast.kind === 'swap' ? (
-              <ArrowLeftRight size={18} className="shrink-0 text-[#0F766E]" />
+              <ArrowLeftRight
+                size={18}
+                className="shrink-0 text-[#0F766E]"
+              />
             ) : toast.kind === 'success' ? (
-              <CheckCircle2 size={18} className="shrink-0 text-green-700" />
+              <CheckCircle2
+                size={18}
+                className="shrink-0 text-green-700"
+              />
             ) : (
-              <X size={18} className="shrink-0 text-amber-700" />
+              <X
+                size={18}
+                className="shrink-0 text-amber-700"
+              />
             )}
-            <p className="flex-1 text-sm text-[#1F2937]">{toast.text}</p>
+
+            <p className="flex-1 text-sm text-[#1F2937]">
+              {toast.text}
+            </p>
+
             {toast.kind === 'swap' && (
               <button
                 onClick={() => navigate('/swaps')}
@@ -347,27 +537,42 @@ export function DashboardPage() {
                 View
               </button>
             )}
-            <button onClick={() => setToast(null)} className="text-[#6B7280]" aria-label="Dismiss">
+
+            <button
+              onClick={() => setToast(null)}
+              className="text-[#6B7280]"
+              aria-label="Dismiss"
+            >
               <X size={16} />
             </button>
           </div>
         </div>
       )}
 
+      {/* Claim drawer */}
       <ClaimDrawer
         hall={claimingHall}
         onClose={() => setClaimingHall(null)}
         onSuccess={handleClaimSuccess}
       />
 
+      {/* Swap request modal */}
       <SwapRequestModal
         open={!!swapModal}
         mode={swapModal}
-        myBookings={myBookings.filter((b) => b.status === 'active' || b.status === 'upcoming')}
+        myBookings={myBookings.filter(
+          (booking) =>
+            booking.status === 'active' ||
+            booking.status === 'upcoming'
+        )}
         allActiveBookings={swapTargets}
         onClose={() => setSwapModal(null)}
         onSuccess={() => {
-          setToast({ kind: 'success', text: 'Swap request sent.' });
+          setToast({
+            kind: 'success',
+            text: 'Swap request sent.',
+          });
+
           void loadAll(false);
         }}
       />
@@ -392,13 +597,22 @@ function StatCard({
     occupied: 'border-[#DC2626]/20 bg-[#FEE2E2] text-[#991B1B]',
     soon: 'border-[#D97706]/20 bg-[#FEF3C7] text-[#92400E]',
   } as const;
+
   return (
-    <div className={clsx('rounded-lg border p-3 shadow-sm', tones[tone])}>
+    <div
+      className={clsx(
+        'rounded-lg border p-3 shadow-sm',
+        tones[tone]
+      )}
+    >
       <div className="flex items-center gap-2 text-xs opacity-80">
         {icon}
         <span>{label}</span>
       </div>
-      <div className="mt-1 text-2xl font-bold">{value}</div>
+
+      <div className="mt-1 text-2xl font-bold">
+        {value}
+      </div>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+
 import { useEffect, useRef } from 'react';
 import { connectSocket, disconnectSocket } from '../lib/socket';
 import type { Socket } from 'socket.io-client';
@@ -59,28 +60,50 @@ type Handlers = {
 };
 
 export function useSocket(handlers: Handlers = {}) {
-  const handlersRef = useRef(handlers);
-  handlersRef.current = handlers;
+  const handlersRef = useRef<Handlers>(handlers);
 
+  // Update handlers after rendering without reconnecting the socket.
+  useEffect(() => {
+    handlersRef.current = handlers;
+  }, [handlers]);
+
+  // Connect socket once and register event listeners.
   useEffect(() => {
     let socket: Socket;
+
     try {
       socket = connectSocket();
     } catch {
       return;
     }
 
-    const handleConnect = () => handlersRef.current.onConnect?.();
-    const handleDisconnect = () => handlersRef.current.onDisconnect?.();
-    const handleHallUpdate = (p: HallUpdatePayload) =>
+    const handleConnect = () => {
+      handlersRef.current.onConnect?.();
+    };
+
+    const handleDisconnect = () => {
+      handlersRef.current.onDisconnect?.();
+    };
+
+    const handleHallUpdate = (p: HallUpdatePayload) => {
       handlersRef.current.onHallUpdate?.(p);
-    const handleBookedSoon = (p: BookedSoonPayload) =>
+    };
+
+    const handleBookedSoon = (p: BookedSoonPayload) => {
       handlersRef.current.onBookedSoon?.(p);
-    const handleSwapNew = (p: SwapNewPayload) => handlersRef.current.onSwapNew?.(p);
-    const handleSwapAccepted = (p: SwapAcceptedPayload) =>
+    };
+
+    const handleSwapNew = (p: SwapNewPayload) => {
+      handlersRef.current.onSwapNew?.(p);
+    };
+
+    const handleSwapAccepted = (p: SwapAcceptedPayload) => {
       handlersRef.current.onSwapAccepted?.(p);
-    const handleSwapRejected = (p: SwapRejectedPayload) =>
+    };
+
+    const handleSwapRejected = (p: SwapRejectedPayload) => {
       handlersRef.current.onSwapRejected?.(p);
+    };
 
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
@@ -90,6 +113,7 @@ export function useSocket(handlers: Handlers = {}) {
     socket.on('swap:accepted', handleSwapAccepted);
     socket.on('swap:rejected', handleSwapRejected);
 
+    // Handle an already-connected socket.
     if (socket.connected) {
       handlersRef.current.onConnect?.();
     }
@@ -102,6 +126,7 @@ export function useSocket(handlers: Handlers = {}) {
       socket.off('swap:new', handleSwapNew);
       socket.off('swap:accepted', handleSwapAccepted);
       socket.off('swap:rejected', handleSwapRejected);
+
       disconnectSocket();
     };
   }, []);

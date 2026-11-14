@@ -1,14 +1,14 @@
 import { lazy, Suspense } from 'react';
-import type {ReactNode} from 'react'
+import type { ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './stores/auth';
 import { LoginPage } from './routes/Login';
 import { RegisterPage } from './routes/Register';
 import { PendingPage } from './routes/Pending';
-// import { SuspendedPage } from './routes/Suspended';
+import { SuspendedPage } from './routes/Suspended';
 import { DashboardPage } from './routes/Dashboard';
 import { BookingsPage } from './routes/Bookings';
-// import { SwapsPage } from './routes/Swaps';
+import { SwapsPage } from './routes/Swaps';
 
 const AdminPage = lazy(() =>
   import('./routes/Admin').then((m) => ({ default: m.AdminPage }))
@@ -52,7 +52,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/pending" element={<PendingPage />} />
-        {/* <Route path="/suspended" element={<SuspendedPage />} /> */}
+        <Route path="/suspended" element={<SuspendedPage />} />
 
         <Route
           path="/dashboard"
@@ -70,14 +70,14 @@ export default function App() {
             </RequireAuth>
           }
         />
-        {/* <Route
+        <Route
           path="/swaps"
           element={
             <RequireAuth>
               <SwapsPage />
             </RequireAuth>
           }
-        /> */}
+        />
 
         <Route
           path={ADMIN_PATH}
